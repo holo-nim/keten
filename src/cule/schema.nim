@@ -1,6 +1,7 @@
 import glaze, std/macrocache
 
 when false:
+  # XXX this needs to be used so the nodes can be serialized properly
   type
     CuleTypeKind* = enum
       CuleExpr
@@ -23,6 +24,12 @@ type
   CuleSchema* = object
     fields*: seq[CuleField]
 
+proc getColumn*(schema: CuleSchema, name: string): int =
+  result = -1
+  for i, field in schema.fields:
+    if field.name == name:
+      return i
+
 proc toNode*(schema: CuleSchema): NimNode =
   glaze(schema)
 
@@ -39,5 +46,17 @@ proc addSchema*(id: SchemaId, schema: CuleSchema) =
 proc getSchema*(id: SchemaId): CuleSchema =
   toSchema(schemas[id])
 
+type CuleFrozenError* = object of CatchableError
+
+const freezes* = CacheTable"cule.freezes"
+
+proc freeze*(id: SchemaId) {.compileTime.} =
+  freezes[id] = glaze true
+
+proc isFrozen*(id: SchemaId): bool {.compileTime.} =
+  id in freezes and deglaze(freezes[id], bool)
+
 proc getSchemaDataHandle*(id: SchemaId): string =
   "cule.data." & id
+
+# maybe indexes?
