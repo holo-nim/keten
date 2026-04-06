@@ -20,7 +20,7 @@ proc print(x: float): string = "got float: " & $x
 proc print(x: string): string = "got string: " & $x
 
 proc process(a: int, b: string): string =
-  Foo.dispatch(id, a) do (id, name, typ):
+  Foo.column(id).dispatch(a) do (id, name, typ):
     let val = take(b, typ)
     result = print(val) & " for " & name
   else: result = "invalid id: " & $a
@@ -34,3 +34,25 @@ doAssert process(2, "xyz") == "got string: xyz for ghi"
 doAssert process(3, "...") == "invalid id: 3"
 doAssert process(5, "") == "invalid id: 5" 
 doAssert process(-1, "...") == "invalid id: -1"
+
+proc getName(i: static int): string =
+  Foo.column(id).find(i) do (id, name, typ):
+    result = name
+  else:
+    result = "invalid"
+doAssert getName(1) == "def"
+doAssert getName(-1) == "invalid"
+doAssert getName(0) == "abc"
+doAssert getName(3) == "invalid"
+
+proc getIdFromName(name: string): int =
+  Foo.column(name).dispatch(name) do (id, _, _):
+    result = id
+  else:
+    result = -1
+
+doAssert getIdFromName("def") == 1
+doAssert getIdFromName("") == -1
+doAssert getIdFromName("ghi") == 2
+doAssert getIdFromName("abc") == 0
+doAssert getIdFromName("jkl") == -1

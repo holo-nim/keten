@@ -1,28 +1,6 @@
-import glaze, data/[schema, query], std/[macros, macrocache], cosm/caseutils
+## abstraction over schemas by attaching to a type
 
-type TypeSectionGen = enum Statement, TypeSection, TypeDef
-
-proc wrap(gen: TypeSectionGen, typeSection: NimNode, remaining: seq[NimNode]): NimNode =
-  case gen
-  of Statement:
-    result = newStmtList()
-    if not typeSection.isNil: result.add typeSection
-    result.add remaining
-  of TypeSection:
-    result = if typeSection.isNil: newNimNode(nnkTypeSection) else: typeSection
-    var val = newNimNode(nnkStmtListType, typeSection)
-    val.add remaining
-    val.add bindSym"void"
-    result.add newTree(nnkTypeDef, genSym(nskType, "_"), newEmptyNode(), val)
-  of TypeDef:
-    if not typeSection.isNil and typeSection.len == 1:
-      result = typeSection[0]
-    else:
-      var val = newNimNode(nnkStmtListType)
-      if not typeSection.isNil: val.add typeSection
-      val.add remaining
-      val.add bindSym"void"
-      result = newTree(nnkTypeDef, genSym(nskType, "_"), newEmptyNode(), val)
+import data/[schema, query], utils/typemacros, glaze, std/[macros, macrocache], cosm/caseutils
 
 type
   FabricKind* = enum
@@ -30,6 +8,8 @@ type
   FabricOptions* = object
     requiresFreeze*: bool
     id*: string
+  SomeFabric* = concept
+    proc getFabricSchemaId(self: typedesc[Self]): SchemaId
 
 proc processFabricType(node: NimNode): KetinAtomType =
   if node.kind in nnkCallKinds + {nnkBracket} and node.len == 2:
@@ -91,7 +71,7 @@ proc buildFabric(options: FabricOptions, body: NimNode): tuple[typeSection: NimN
   iterFabricFields(schema.fields, body[2][^1])
   var rawId = options.id
   if rawId.len == 0:
-    rawId = $schemas.len & "-" & toKebabCase(name)
+    rawId = $schemas.len & "-" & toKebabCase(name, uncapitalized = true)
   let id = SchemaId(rawId)
   addSchema id, schema
   var newType = newNimNode(nnkTypeDef, body)
@@ -115,13 +95,7 @@ proc buildFabric(options: FabricOptions, body: NimNode): tuple[typeSection: NimN
   result.remaining.add defineRowAdd(id, stitchName, stitchParams)
 
 proc fabricImpl(options: FabricOptions, body: NimNode): NimNode =
-  let gen =
-    case body.kind
-    of nnkTypeDef:
-      when (NimMajor, NimMinor) >= (2, 0): TypeSection
-      else: TypeDef
-    of nnkTypeSection: TypeSection
-    else: Statement
+  let gen = detectTypeSection(body)
   let (typeSection, remaining) = buildFabric(options, body)
   result = wrap(gen, typeSection, remaining)
 
@@ -137,30 +111,89 @@ macro fabric*(option: static string, body: untyped): untyped =
 macro fabric*(option: static FabricOptions, body: untyped): untyped =
   fabricImpl(option, body)
 
-macro dispatchImpl(id: static SchemaId, column: untyped, value: typed, toApply: untyped, elses: varargs[untyped]): untyped =
-  let schema = getSchema(id)
+type FabricColumn* = object
+  schemaId*: SchemaId
+  num*: int
+
+macro columnImpl(id: static SchemaId, column: untyped): FabricColumn =
   let realColumn =
     if column.kind in {nnkIntLit..nnkUint64Lit}: column.intVal.int
-    else: getColumn(schema, $column)
+    else: getColumn(id, $column)
+  let columnCount = columnCount(id)
+  if realColumn < 0 or realColumn >= columnCount:
+    error "column " & repr(column) & " not in schema with " & $columnCount & " fields", column
+  result = glaze FabricColumn(schemaId: id, num: realColumn)
+
+template column*[T: SomeFabric](_: typedesc[T], column: untyped): FabricColumn =
+  columnImpl(getFabricSchemaId(T), column)
+
+proc promoteLambda(node: NimNode, baseName: string, stmts: NimNode, used = false): NimNode =
+  let (kind, symkind, kindname) =
+    if node.kind == nnkLambda: (nnkProcDef, nskProc, "Proc")
+    else: (nnkTemplateDef, nskTemplate, "Templ")
+  var routine = newNimNode(kind, node)
+  for child in node: routine.add child
+  if used:
+    let prag = ident"used"
+    if routine[4].kind == nnkEmpty:
+      routine[4] = newTree(nnkPragma, prag)
+    else:
+      assert routine[4].kind == nnkPragma
+      routine[4].add prag
+  result = genSym(symkind, baseName & kindname)
+  routine[0] = result
+  stmts.add routine
+
+macro unravelImpl(id: static SchemaId, toApply: untyped): untyped =
   var callPattern = toApply
   result = newStmtList()
   if toApply.kind in {nnkLambda, nnkDo}:
-    let (kind, symkind, kindname) =
-      if toApply.kind == nnkLambda: (nnkProcDef, nskProc, "Proc")
-      else: (nnkTemplateDef, nskTemplate, "Templ")
-    var routine = newNimNode(kind, toApply)
-    for child in toApply: routine.add child
-    let routineName = genSym(symkind, "dispatch" & kindname)
-    routine[0] = routineName
-    callPattern = routineName
-    result.add routine
+    callPattern = promoteLambda(toApply, "unravel", result)
+  result.add doUnravel(id, callPattern)
+
+template unravel*[T: SomeFabric](_: typedesc[T], toApply: untyped): untyped =
+  unravelImpl(getFabricSchemaId(T), toApply)
+
+macro dispatch*(column: static FabricColumn, value: typed, toApply: untyped, elses: varargs[untyped]): untyped =
+  var callPattern = toApply
+  result = newStmtList()
+  if toApply.kind in {nnkLambda, nnkDo}:
+    callPattern = promoteLambda(toApply, "dispatch", result)
   var realElse: NimNode = nil
   if elses.len > 0:
     if elses.len != 1: error "only 1 else supported", elses
     if elses[0].kind != nnkElse: error "expected else", elses[0]
     realElse = elses[0][0]
-  result.add dispatch(id, realColumn, value, callPattern, realElse)
+  result.add doDispatch(column.schemaId, column.num, value, callPattern, realElse)
 
-macro dispatch*(T: typedesc, column: untyped, value: typed, toApply: untyped, elses: varargs[untyped]): untyped =
-  result = newCall(bindSym"dispatchImpl", newCall(ident"getFabricSchemaId", T), column, value, toApply)
-  for e in elses: result.add e
+macro find*(column: static FabricColumn, value: typed, toApply: untyped, elses: varargs[untyped]): untyped =
+  var callPattern = toApply
+  result = newStmtList()
+  if toApply.kind in {nnkLambda, nnkDo}:
+    callPattern = promoteLambda(toApply, "find", result, used = true) # gives false unused warning for some reason
+  var realElse: NimNode = nil
+  if elses.len > 0:
+    if elses.len != 1: error "only 1 else supported", elses
+    if elses[0].kind != nnkElse: error "expected else", elses[0]
+    realElse = elses[0][0]
+  let implName = genSym(nskMacro, "findImpl")
+  var implParams = @[ident"untyped",
+    newIdentDefs(ident"toApplyImpl", ident"untyped")]
+  if not realElse.isNil:
+    implParams.add newIdentDefs(ident"elseImpl", ident"untyped")
+  var implOp = newCall(bindSym"doFind",
+    newLit column.schemaId,
+    newLit column.num,
+    value,
+    ident"toApplyImpl",
+    if realElse.isNil: newNilLit() else: ident"elseImpl")
+  let impl = newProc(
+    procType = nnkMacroDef,
+    name = implName,
+    params = implParams,
+    body = newAssignment(ident"result", implOp)
+  )
+  result.add impl
+  var implCall = newCall(implName, callPattern)
+  if not realElse.isNil: implCall.add realElse
+  result.add implCall

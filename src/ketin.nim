@@ -1,4 +1,4 @@
-import ketin/data/schema, ketin/syntax
+import ketin/data/schema, ketin/fabric
 export SchemaId, FrozenError, NotFrozenError, freeze, isFrozen
-export syntax
+export fabric
 

@@ -50,6 +50,35 @@ proc readRequiresFreeze*(id: SchemaId): bool =
       result = deglaze(node[i][1], bool)
       return result
 
+proc columnCount*(id: SchemaId): int =
+  result = -1
+  let node = schemas[id]
+  for i in 1 ..< node.len:
+    assert node[i].kind == nnkExprColonExpr
+    if node[i][0].eqIdent"fields":
+      return node[i][1].len
+
+proc getColumn*(id: SchemaId, name: string): int =
+  # maybe faster than fully deserializing schema object
+  result = -1
+  let node = schemas[id]
+  for i in 1 ..< node.len:
+    assert node[i].kind == nnkExprColonExpr
+    if node[i][0].eqIdent"fields":
+      var s = node[i][1]
+      if s.kind in nnkCallKinds and s.len == 2 and s[0].eqIdent"@":
+        s = s[1]
+      for col, field in s:
+        assert field.kind == nnkObjConstr
+        for j in 1 ..< field.len:
+          assert field[j].kind == nnkExprColonExpr
+          if field[j][0].eqIdent"name":
+            assert field[j][1].kind in {nnkStrLit..nnkTripleStrLit}
+            if name == field[j][1].strVal:
+              return col
+            break
+      break
+
 type
   FrozenError* = object of CatchableError
   NotFrozenError* = object of CatchableError

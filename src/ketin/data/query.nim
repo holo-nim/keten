@@ -3,7 +3,10 @@ import ./schema, glaze, std/[macrocache, macros]
 proc getSchemaData*(id: SchemaId): CacheSeq =
   CacheSeq(getSchemaDataHandle(id))
 
-type RawRow* = seq[RawNimNode]
+type
+  RawRow* = seq[RawNimNode]
+  EmptyColumn* = object
+    ## representation of `nil` node passed to users
 
 proc addRawRow*(id: SchemaId, row: RawRow) =
   if isFrozen(id):
@@ -77,7 +80,7 @@ template columnExists*(value: NimNode): bool =
 
 # single column operations:
 
-proc pick*(id: SchemaId, column: int, ignoreRest = true): tuple[found: int, value: NimNode] =
+proc doPick*(id: SchemaId, column: int, ignoreRest = true): tuple[found: int, value: NimNode] =
   result.found = 0
   for row in eachRawRow(id):
     let node = row[column].NimNode
@@ -89,7 +92,7 @@ proc pick*(id: SchemaId, column: int, ignoreRest = true): tuple[found: int, valu
       else:
         return
 
-proc choice*(id: SchemaId, column: int): NimNode =
+proc doChoice*(id: SchemaId, column: int): NimNode =
   result = newNimNode(nnkClosedSymChoice)
   for row in eachRawRow(id):
     let node = row[column].NimNode
@@ -101,14 +104,14 @@ proc choice*(id: SchemaId, column: int): NimNode =
       else:
         error "non-symbol node kind " & $node.kind & " for choice of " & $column & " in " & $id, node
 
-proc count*(id: SchemaId, column: int): int =
+proc doCount*(id: SchemaId, column: int): int =
   result = 0
   for row in eachRawRow(id):
     let node = row[column].NimNode
     if columnExists(node):
       inc result
 
-proc collect*(id: SchemaId, column: int, result: NimNode) =
+proc doCollect*(id: SchemaId, column: int, result: NimNode) =
   for row in eachRawRow(id):
     let node = row[column].NimNode
     if columnExists(node):
@@ -130,10 +133,21 @@ proc makeApplicable*(root: NimNode): NimNode =
 proc applyRow*(call: NimNode, row: RawRow) =
   # works for calls, collection literals, etc
   for col in row:
-    # XXX all columns have to exist here
-    call.add col.NimNode
+    let node = col.NimNode
+    if columnExists(node):
+      call.add node
+    else:
+      call.add newTree(nnkObjConstr, bindSym"EmptyColumn")
 
-proc dispatch*(id: SchemaId, column: int, value: NimNode, callPattern: NimNode, elseBody: NimNode): NimNode =
+proc doUnravel*(id: SchemaId, callPattern: NimNode): NimNode =
+  ## generates statement list that calls `callPattern` with each row
+  result = newNimNode(nnkStmtList, callPattern)
+  for row in eachRawRow(id):
+    var call = copyApplyPattern(callPattern)
+    applyRow(call, row)
+    result.add call
+
+proc doDispatch*(id: SchemaId, column: int, value: NimNode, callPattern: NimNode, elseBody: NimNode): NimNode =
   ## generates a `case` statement for `value` based on the values of `column`,
   ## calls `callPattern` with found row
   ## 
@@ -152,7 +166,7 @@ proc dispatch*(id: SchemaId, column: int, value: NimNode, callPattern: NimNode, 
   if not elseBody.isNil:
     result.add newTree(nnkElse, elseBody)
 
-proc find*[T](id: SchemaId, column: int, value: T, call: NimNode, elseBody: NimNode): NimNode =
+proc doFind*[T](id: SchemaId, column: int, value: T, call: NimNode, elseBody: NimNode): NimNode =
   ## checks for equality to `value` in the static values of `column`,
   ## calls `call` with found row, otherwise returns `elseBody`
   for row in eachRawRow(id):
