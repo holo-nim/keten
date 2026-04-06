@@ -13,7 +13,7 @@ proc addRawRow*(id: SchemaId, row: RawRow) =
     raise newException(FrozenError, "schema " & $id & " is frozen, no rows can be added")
   getSchemaData(id).add glaze(row)
 
-proc defineRowAdd*(id: SchemaId, rawName: NimNode, initialParams: seq[NimNode] = @[newEmptyNode()]): NimNode =
+proc defineRowAdd*(id: SchemaId, rawName: NimNode, initialParams: seq[NimNode] = @[newEmptyNode()], genericParams: NimNode = nil): NimNode =
   var rawName = rawName
   let isExported = rawName.kind in {nnkPrefix, nnkPostfix}
   if isExported: rawName = rawName[1]
@@ -60,6 +60,8 @@ proc defineRowAdd*(id: SchemaId, rawName: NimNode, initialParams: seq[NimNode] =
     name = rawName,
     params = params,
     body = newCall(bindSym"addRawRow", glaze id, newCall(bindSym"@", row)))
+  if not genericParams.isNil:
+    result[2] = genericParams
 
 proc currentCount*(id: SchemaId): int =
   # no freeze requirement?

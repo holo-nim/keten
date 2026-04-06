@@ -71,7 +71,7 @@ proc buildFabric(options: FabricOptions, body: NimNode): NimNode =
   addSchema id, schema
   var newType = newNimNode(nnkTypeDef, body)
   newType.add body[0]
-  newType.add body[1]
+  newType.add newEmptyNode() #body[1]
   newType.add newTree(nnkObjectTy, newEmptyNode(), newEmptyNode(), newEmptyNode())
   result.add newTree(nnkTypeSection, newType)
   result.add newProc(
@@ -86,8 +86,8 @@ proc buildFabric(options: FabricOptions, body: NimNode): NimNode =
   var stitchName = ident"stitch"
   if isPostfix: stitchName = newTree(nnkPostfix, ident"*", stitchName)
   var stitchParams = @[newEmptyNode()]
-  stitchParams.add newTree(nnkIdentDefs, ident"T", newTree(nnkBracketExpr, ident"typedesc", ident name), newEmptyNode())
-  result.add defineRowAdd(id, stitchName, stitchParams)
+  stitchParams.add newTree(nnkIdentDefs, ident"_", newTree(nnkBracketExpr, ident"typedesc", ident name), newEmptyNode())
+  result.add defineRowAdd(id, stitchName, stitchParams, body[1])
 
 proc fabricImpl(options: FabricOptions, body: NimNode): NimNode =
   let gen = detectTypeSection(body)
@@ -138,6 +138,32 @@ proc promoteLambda(node: NimNode, baseName: string, stmts: NimNode, used = false
   result = genSym(symkind, baseName & kindname)
   routine[0] = result
   stmts.add routine
+
+macro pick*(column: static FabricColumn): untyped =
+  let (count, node) = doPick(column.schemaId, column.num, ignoreRest = false)
+  if node.isNil:
+    error "could not find entry of column " & $column.num & " in schema " & $column.schemaId
+  elif count > 1:
+    error "got more than 1 entry for column " & $column.num & " in schema " & $column.schemaId
+  result = node
+
+macro pluck*(column: static FabricColumn): untyped =
+  let (_, node) = doPick(column.schemaId, column.num, ignoreRest = true)
+  if node.isNil:
+    error "could not find entry of column " & $column.num & " in schema " & $column.schemaId
+  result = node
+
+macro choice*(column: static FabricColumn): untyped =
+  result = doChoice(column.schemaId, column.num)
+
+macro collect*(column: static FabricColumn, toApply: untyped): untyped =
+  var callPattern = toApply
+  result = newStmtList()
+  if toApply.kind in {nnkLambda, nnkDo}:
+    callPattern = promoteLambda(toApply, "collect", result)
+  callPattern = makeApplicable(callPattern)
+  doCollect(column.schemaId, column.num, callPattern)
+  result.add callPattern
 
 macro unravelImpl(id: static SchemaId, toApply: untyped): untyped =
   var callPattern = toApply
@@ -252,6 +278,9 @@ macro stitchDecl*[T: SomeFabric](t: typedesc[T], args: varargs[untyped]): untype
   let typeSec = detectTypeSection(decl)
   collectDecls(decl, stitchCall)
   result = wrap(typeSec, newStmtList(decl, stitchCall))
+
+template currentCount*[T: SomeFabric](t: typedesc[T]): int =
+  (static(currentCount(getFabricSchemaId(t))))
 
 template freeze*[T: SomeFabric](t: typedesc[T]) =
   static: freeze(getFabricSchemaId(t))
