@@ -187,6 +187,8 @@ macro dispatch*(column: static FabricColumn, value: typed, toApply: untyped, els
     callPattern = promoteLambda(toApply, "dispatch", result)
   let realElse = unwrapElses(elses)
   result.add doDispatch(column.schemaId, column.num, value, callPattern, realElse)
+  #echo result.repr
+  #echo result.treeRepr
 
 macro find*(column: static FabricColumn, value: typed, toApply: untyped, elses: varargs[untyped]): untyped =
   var callPattern = toApply
@@ -251,5 +253,13 @@ macro stitchDecl*[T: SomeFabric](t: typedesc[T], args: varargs[untyped]): untype
   collectDecls(decl, stitchCall)
   result = wrap(typeSec, newStmtList(decl, stitchCall))
 
+template freeze*[T: SomeFabric](t: typedesc[T]) =
+  static: freeze(getFabricSchemaId(t))
+
+template isFrozen*[T: SomeFabric](t: typedesc[T]): bool =
+  (static(isFrozen(getFabricSchemaId(t))))
+
 # XXX implement:
 # * dispatch `case` in object type
+# * pragma to stitch inherited object types to the attached schema of the parent type
+#   rather than having to spell out the schema separately
