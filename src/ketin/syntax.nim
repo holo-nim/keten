@@ -1,4 +1,4 @@
-import glaze, ./[schema, data], std/[macros, macrocache], cosm/caseutils
+import glaze, data/[schema, query], std/[macros, macrocache], cosm/caseutils
 
 type TypeSectionGen = enum Statement, TypeSection, TypeDef
 

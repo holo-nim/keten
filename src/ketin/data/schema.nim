@@ -10,7 +10,6 @@ type
     of ExprAtom, TypeAtom, StaticAtom:
       constraint*: RawNimNode
   KetinField* = object
-    # or "strand"
     column*: int
     name*: string
     `type`*: KetinAtomType # can be untyped, typed, static, typedesc, or other typed node

@@ -58,6 +58,10 @@ proc defineRowAdd*(id: SchemaId, rawName: NimNode, initialParams: seq[NimNode] =
     params = params,
     body = newCall(bindSym"addRawRow", glaze id, newCall(bindSym"@", row)))
 
+proc currentCount*(id: SchemaId): int =
+  # no freeze requirement?
+  len(getSchemaData(id))
+
 iterator eachRawRow*(id: SchemaId): RawRow =
   if readRequiresFreeze(id) and not isFrozen(id):
     raise newException(NotFrozenError, "schema " & $id & " requires being frozen to read but is not frozen")
