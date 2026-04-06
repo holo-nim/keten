@@ -221,7 +221,40 @@ macro find*(column: static FabricColumn, value: typed, toApply: untyped, elses: 
   if not realElse.isNil: implCall.add realElse
   result.add implCall
 
+proc collectDecls(decl: NimNode, call: NimNode) =
+  # maybe {.ignore.} pragma
+  case decl.kind
+  of nnkStmtList:
+    for st in decl:
+      collectDecls(st, call)
+  of RoutineNodes:
+    var nameNode = decl[0]
+    if nameNode.kind == nnkPostfix: nameNode = nameNode[1]
+    call.add nameNode
+  of nnkVarSection, nnkLetSection, nnkConstSection, nnkTypeSection:
+    for d in decl:
+      collectDecls(d, call)
+  of nnkIdentDefs, nnkConstDef, nnkTypeDef:
+    for i in 0 ..< decl.len - 2:
+      var nameNode = decl[i]
+      if nameNode.kind == nnkPragmaExpr: nameNode = nameNode[0]
+      if nameNode.kind == nnkPostfix: nameNode = nameNode[1]
+      call.add nameNode
+  of nnkEmpty, nnkCommentStmt, nnkDiscardStmt, nnkNilLit: discard
+  else:
+    error "unsure how to read decl of kind: " & $decl.kind, decl
+
+macro stitchDecl*[T: SomeFabric](t: typedesc[T], args: varargs[untyped]): untyped =
+  if args.len == 0:
+    error "expected decl", args
+  var stitchCall = newCall(ident"stitch", t)
+  let declPos = args.len - 1
+  for i in 0 ..< declPos:
+    stitchCall.add args[i]
+  let decl = args[declPos]
+  let typeSec = detectTypeSection(decl)
+  collectDecls(decl, stitchCall)
+  result = wrap(typeSec, newStmtList(decl, stitchCall))
+
 # XXX implement:
 # * dispatch `case` in object type
-# * pragma to easily stitch types i.e. `type Foo {.stitch: (a, b).} = object ...` calls `stitch(a, b, Foo)`
-#   maybe define per scheme or allow user to define it easily to also support optional arguments

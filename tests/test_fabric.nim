@@ -9,15 +9,27 @@ stitch Foo, 0, "abc", int
 Foo.stitch 1, "def", float
 Foo.stitch 2, "ghi", string
 
+type Bar {.stitchDecl(Foo, 10, "bar").} = ref object of RootObj
+  val: string
+
+stitchDecl(Foo):
+  const bazId = 100
+  const bazName = "baz"
+  type Baz = distinct string
+
 import std/strutils
 
 proc take(s: string, T: type int): T = parseInt(s)
 proc take(s: string, T: type float): T = parseFloat(s)
 proc take(s: string, T: type string): T = s
+proc take(s: string, T: type Bar): T = Bar(val: s)
+proc take(s: string, T: type Baz): T = Baz(s)
 
 proc print(x: int): string = "got int: " & $x
 proc print(x: float): string = "got float: " & $x
 proc print(x: string): string = "got string: " & $x
+proc print(x: Bar): string = "got bar: " & $x[]
+proc print(x: Baz): string = "got baz: " & x.string
 
 proc process(a: int, b: string): string =
   Foo.column(id).dispatch(a) do (id, name, typ):
@@ -34,6 +46,8 @@ doAssert process(2, "xyz") == "got string: xyz for ghi"
 doAssert process(3, "...") == "invalid id: 3"
 doAssert process(5, "") == "invalid id: 5" 
 doAssert process(-1, "...") == "invalid id: -1"
+doAssert process(10, "foobar") == "got bar: (val: \"foobar\") for bar"
+doAssert process(100, "foobar") == "got baz: foobar for baz"
 
 proc getName(i: static int): string =
   Foo.column(id).find(i) do (id, name, typ):
@@ -44,6 +58,8 @@ doAssert getName(1) == "def"
 doAssert getName(-1) == "invalid"
 doAssert getName(0) == "abc"
 doAssert getName(3) == "invalid"
+doAssert getName(10) == "bar"
+doAssert getName(bazId) == "baz"
 
 proc getIdFromName(name: string): int =
   Foo.column(name).dispatch(name) do (id, _, _):
@@ -56,3 +72,5 @@ doAssert getIdFromName("") == -1
 doAssert getIdFromName("ghi") == 2
 doAssert getIdFromName("abc") == 0
 doAssert getIdFromName("jkl") == -1
+doAssert getIdFromName("bar") == 10
+doAssert getIdFromName(bazName) == 100
