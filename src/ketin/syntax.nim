@@ -31,20 +31,20 @@ type
     requiresFreeze*: bool
     id*: string
 
-proc processFabricType(node: NimNode): KetenAtomType =
+proc processFabricType(node: NimNode): KetinAtomType =
   if node.kind in nnkCallKinds + {nnkBracket} and node.len == 2:
     if node[0].eqIdent"typedesc" or node[0].eqIdent"type":
-      return KetenAtomType(kind: TypeAtom, constraint: RawNimNode node[1])
+      return KetinAtomType(kind: TypeAtom, constraint: RawNimNode node[1])
     elif node[0].eqIdent"static":
-      return KetenAtomType(kind: StaticAtom, constraint: RawNimNode node[1])
+      return KetinAtomType(kind: StaticAtom, constraint: RawNimNode node[1])
   elif node.kind in {nnkIdent, nnkAccQuoted, nnkSym, nnkOpenSymChoice, nnkClosedSymChoice}:
     if node.eqIdent"typedesc" or node.eqIdent"type":
-      return KetenAtomType(kind: TypeAtom, constraint: RawNimNode nil)
+      return KetinAtomType(kind: TypeAtom, constraint: RawNimNode nil)
     elif node.eqIdent"static":
-      return KetenAtomType(kind: StaticAtom, constraint: RawNimNode nil)
-  result = KetenAtomType(kind: ExprAtom, constraint: RawNimNode node)
+      return KetinAtomType(kind: StaticAtom, constraint: RawNimNode nil)
+  result = KetinAtomType(kind: ExprAtom, constraint: RawNimNode node)
 
-proc iterFabricFields(fields: var seq[KetenField], node: NimNode) =
+proc iterFabricFields(fields: var seq[KetinField], node: NimNode) =
   case node.kind
   of nnkRecList, nnkTupleTy:
     for n in node:
@@ -62,7 +62,7 @@ proc iterFabricFields(fields: var seq[KetenField], node: NimNode) =
       if nameNode.kind == nnkPostfix: nameNode = nameNode[1]
       let name = $nameNode
       let col = fields.len
-      fields.add KetenField(column: col, name: name, type: typ, default: RawNimNode(copy node[typPos + 1]))
+      fields.add KetinField(column: col, name: name, type: typ, default: RawNimNode(copy node[typPos + 1]))
   of nnkDiscardStmt, nnkNilLit, nnkEmpty: discard
   else:
     error("invalid type ast for fabric: " & $node.kind, node)
@@ -85,7 +85,7 @@ proc buildFabric(options: FabricOptions, body: NimNode): tuple[typeSection: NimN
   let isPostfix = nameNode.kind == nnkPostfix
   if isPostfix: nameNode = nameNode[1]
   let name = $nameNode
-  var schema = KetenSchema(readRequiresFreeze: options.requiresFreeze)
+  var schema = KetinSchema(readRequiresFreeze: options.requiresFreeze)
   if body[2].kind != nnkObjectTy:
     error "expected object type for fabric", body[2]
   iterFabricFields(schema.fields, body[2][^1])

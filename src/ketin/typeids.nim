@@ -1,6 +1,6 @@
 import std/[macros, macrocache]
 
-const typeIdCounter = CacheCounter"keten.typeids"
+const typeIdCounter = CacheCounter"ketin.typeids"
 
 type TypeId* = distinct int
   # currently uses a counter

@@ -1,4 +1,4 @@
-import keten
+import ketin
 
 type Foo {.fabric: ().} = object
   id: static int
