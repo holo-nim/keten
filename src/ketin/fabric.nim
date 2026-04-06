@@ -47,17 +47,12 @@ proc iterFabricFields(fields: var seq[KetinField], node: NimNode) =
   else:
     error("invalid type ast for fabric: " & $node.kind, node)
 
-proc buildFabric(options: FabricOptions, body: NimNode): tuple[typeSection: NimNode, remaining: seq[NimNode]] =
+proc buildFabric(options: FabricOptions, body: NimNode): NimNode =
+  result = newStmtList()
   if body.kind in {nnkStmtList, nnkTypeSection}:
     for b in body:
-      let (types, remaining) = buildFabric(options, b)
-      if result.typeSection.isNil:
-        result.typeSection = types
-      elif result.remaining.len == 0:
-        for td in types: result.typeSection.add td
-      else:
-        result.remaining.add types
-      result.remaining.add remaining
+      let stmts = buildFabric(options, b)
+      for st in stmts: result.add st
     return result
   expectKind body, nnkTypeDef
   var nameNode = body[0]
@@ -78,8 +73,8 @@ proc buildFabric(options: FabricOptions, body: NimNode): tuple[typeSection: NimN
   newType.add body[0]
   newType.add body[1]
   newType.add newTree(nnkObjectTy, newEmptyNode(), newEmptyNode(), newEmptyNode())
-  result.typeSection = newTree(nnkTypeSection, newType)
-  result.remaining.add newProc(
+  result.add newTree(nnkTypeSection, newType)
+  result.add newProc(
     procType = nnkTemplateDef,
     name =
       if isPostfix: newTree(nnkPostfix, ident"*", ident"getFabricSchemaId")
@@ -92,12 +87,12 @@ proc buildFabric(options: FabricOptions, body: NimNode): tuple[typeSection: NimN
   if isPostfix: stitchName = newTree(nnkPostfix, ident"*", stitchName)
   var stitchParams = @[newEmptyNode()]
   stitchParams.add newTree(nnkIdentDefs, ident"T", newTree(nnkBracketExpr, ident"typedesc", ident name), newEmptyNode())
-  result.remaining.add defineRowAdd(id, stitchName, stitchParams)
+  result.add defineRowAdd(id, stitchName, stitchParams)
 
 proc fabricImpl(options: FabricOptions, body: NimNode): NimNode =
   let gen = detectTypeSection(body)
-  let (typeSection, remaining) = buildFabric(options, body)
-  result = wrap(gen, typeSection, remaining)
+  let stmts = buildFabric(options, body)
+  result = wrap(gen, stmts)
 
 macro fabric*(option: static tuple[], body: untyped): untyped =
   fabricImpl(FabricOptions(), body)
